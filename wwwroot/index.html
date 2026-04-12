@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Akıllı Belge Okuyucu | AI + OCR</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body { background-color: #f0f2f5; }
+        .result-box { background-color: #1e2432; color: #4ade80; font-family: monospace; font-size: 0.85rem; white-space: pre-wrap; word-break: break-all; }
+        #loading { display: none; }
+        .similarity-bar { height: 22px; border-radius: 6px; transition: width 0.6s ease; }
+        .match-badge-success { background: #d1fae5; color: #065f46; border: 1px solid #6ee7b7; }
+        .match-badge-warn    { background: #fef9c3; color: #92400e; border: 1px solid #fde047; }
+        .match-badge-danger  { background: #fee2e2; color: #991b1b; border: 1px solid #fca5a5; }
+        .token-chip { background: #e0e7ff; color: #3730a3; border-radius: 20px; padding: 2px 10px; font-size: 0.78rem; font-weight: 600; }
+        .intent-chip { border-radius: 20px; padding: 2px 10px; font-size: 0.8rem; font-weight: 600; }
+        .intent-local  { background: #dcfce7; color: #166534; }
+        .intent-llm    { background: #ede9fe; color: #5b21b6; }
+        .intent-direct { background: #dbeafe; color: #1e40af; }
+    </style>
+</head>
+<body>
+    <div class="container mt-5 mb-5">
+        <h2 class="text-center mb-1">📄 AI Destekli Belge Okuyucu</h2>
+        <p class="text-center text-muted mb-4">OCR + Vision AI — Doğal Dil Sorgu | Token Analizi | Güven Skoru</p>
+
+        <div class="card shadow-sm p-4 mx-auto" style="max-width: 620px;">
+            <form id="uploadForm">
+                <div class="mb-3">
+                    <label class="form-label fw-bold">Belge Yükle (PDF veya Resim)</label>
+                    <input type="file" class="form-control" id="file" accept=".pdf, image/*" required>
+                </div>
+                <div class="mb-4">
+                    <label class="form-label fw-bold">Ne arıyorsun?</label>
+                    <input type="text" class="form-control" id="userQuery"
+                           placeholder="Örn: bana ibanı ver, fatura tutarı nedir, tarih ne?" required>
+                    <div class="form-text text-muted">
+                        Doğal dille yazabilirsin — "IBAN", "iban ver misin", "hesap numarası" hepsi çalışır.
+                    </div>
+                </div>
+                <button type="submit" class="btn btn-primary w-100 fs-5">🚀 Hedefi Bul ve Oku</button>
+            </form>
+
+            <div id="loading" class="text-center mt-4">
+                <div class="spinner-border text-primary" role="status"></div>
+                <p class="mt-2 text-muted">Belge taranıyor ve yapay zekaya gönderiliyor...</p>
+            </div>
+        </div>
+
+        <!-- ── SONUÇ ALANI ── -->
+        <div class="d-none mt-5" id="resultSection">
+            <h4 class="text-center mb-1">İşlem Sonucu 🎉</h4>
+
+            <!-- Intent resolution bilgisi -->
+            <div class="text-center mb-4">
+                <span class="text-muted small me-2">Anlanan alan:</span>
+                <span class="fw-bold me-2" id="resolvedFieldLabel">—</span>
+                <span class="intent-chip" id="intentMethodChip">—</span>
+            </div>
+
+            <!-- Satır 1: Kırpılan resim + Gemini JSON -->
+            <div class="row mb-3">
+                <div class="col-md-6 mb-3">
+                    <div class="card h-100 shadow-sm border-warning">
+                        <div class="card-header bg-warning text-dark fw-bold">
+                            ✂️ Kırpılan Alan (Lokal OCR)
+                        </div>
+                        <div class="card-body text-center d-flex align-items-center justify-content-center bg-light">
+                            <img id="croppedImage" class="img-fluid border shadow-sm" style="max-height:200px;" src="" alt="Kırpılan">
+                        </div>
+                        <div class="card-footer text-muted small">
+                            * Sadece bu alan Gemini'ye gönderildi (token tasarrufu).
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-6 mb-3">
+                    <div class="card h-100 shadow-sm border-success">
+                        <div class="card-header bg-success text-white fw-bold">
+                            🤖 Gemini Yapay Zeka Sonucu
+                        </div>
+                        <div class="card-body bg-dark p-2">
+                            <pre id="jsonResult" class="result-box p-2 m-0"></pre>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Satır 2: Token + Benzerlik -->
+            <div class="row mb-3">
+                <div class="col-md-4 mb-3">
+                    <div class="card h-100 shadow-sm border-0" style="background:#eef2ff;">
+                        <div class="card-header fw-bold" style="background:#c7d2fe; color:#312e81;">
+                            🔢 Token Analizi
+                        </div>
+                        <div class="card-body">
+                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                <span class="text-muted small">Input</span>
+                                <span class="token-chip" id="inputTokens">—</span>
+                            </div>
+                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                <span class="text-muted small">Output</span>
+                                <span class="token-chip" id="outputTokens">—</span>
+                            </div>
+                            <hr class="my-1">
+                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                <span class="fw-bold small">Toplam</span>
+                                <span class="token-chip" style="background:#dde1ff;" id="totalTokens">—</span>
+                            </div>
+                            <hr class="my-1">
+                            <div class="d-flex justify-content-between align-items-center">
+                                <span class="fw-bold text-success small">Tahmini Maliyet</span>
+                                <span class="token-chip bg-success text-white border-0" id="estimatedCost">—</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-md-8 mb-3">
+                    <div class="card h-100 shadow-sm border-0" style="background:#f0fdf4;">
+                        <div class="card-header fw-bold" style="background:#bbf7d0; color:#14532d;">
+                            🔍 OCR ↔ LLM Karşılaştırma
+                        </div>
+                        <div class="card-body">
+                            <div class="mb-2">
+                                <span class="text-muted small">OCR Satırı:</span>
+                                <div class="fw-semibold text-break small" id="ocrLineText" style="color:#374151;"></div>
+                            </div>
+                            <div class="mb-3">
+                                <span class="text-muted small">LLM Değeri:</span>
+                                <div class="fw-semibold text-break small" id="llmExtractedText" style="color:#1d4ed8;"></div>
+                            </div>
+                            <div class="mb-1 d-flex justify-content-between">
+                                <span class="small text-muted">Benzerlik</span>
+                                <span class="fw-bold" id="scoreLabel">—</span>
+                            </div>
+                            <div class="progress mb-2" style="height:22px; border-radius:6px;">
+                                <div id="similarityBar" class="progress-bar similarity-bar"
+                                     role="progressbar" style="width:0%"></div>
+                            </div>
+                            <div class="text-center mt-2">
+                                <span id="matchBadge" class="px-3 py-1 rounded-pill fw-bold" style="font-size:0.9rem;"></span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        document.getElementById('uploadForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const fileInput = document.getElementById('file');
+            const userQuery = document.getElementById('userQuery').value;
+
+            document.getElementById('resultSection').classList.add('d-none');
+            document.getElementById('loading').style.display = 'block';
+
+            const formData = new FormData();
+            formData.append('file', fileInput.files[0]);
+            formData.append('userQuery', userQuery);  // ← artık userQuery
+
+            try {
+                const response = await fetch('/api/extract', { method: 'POST', body: formData });
+
+                if (!response.ok) {
+                    const errText = await response.text();
+                    throw new Error(errText || `Sunucu hatası: HTTP ${response.status}`);
+                }
+
+                const r = await response.json();
+
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('resultSection').classList.remove('d-none');
+
+                // Intent çözümleme bilgisi
+                document.getElementById('resolvedFieldLabel').innerText = r.resolvedField || r.fieldName || '—';
+
+                const chip = document.getElementById('intentMethodChip');
+                const methodLabels = { local: '⚡ yerel eşleşme', llm: '🤖 LLM çözümledi', direct: '🎯 doğrudan' };
+                const methodClasses = { local: 'intent-chip intent-local', llm: 'intent-chip intent-llm', direct: 'intent-chip intent-direct' };
+                chip.innerText   = methodLabels[r.intentMethod]  || r.intentMethod;
+                chip.className   = methodClasses[r.intentMethod] || 'intent-chip';
+
+                // Temel sonuçlar
+                document.getElementById('croppedImage').src = 'data:image/png;base64,' + r.croppedImageBase64;
+                document.getElementById('jsonResult').innerText = r.extractedValue;
+
+                // Token analizi
+                document.getElementById('inputTokens').innerText  = r.inputTokens;
+                document.getElementById('outputTokens').innerText = r.outputTokens;
+                document.getElementById('totalTokens').innerText  = r.totalTokens;
+                document.getElementById('estimatedCost').innerText = r.estimatedCost != null ? '$' + r.estimatedCost.toFixed(6) : '—';
+
+                // OCR vs LLM metinleri
+                document.getElementById('ocrLineText').innerText      = r.ocrLineText      || '—';
+                document.getElementById('llmExtractedText').innerText = r.llmExtractedText || '—';
+
+                // Benzerlik bar
+                const pct = Math.round(r.similarityScore * 100);
+                const bar = document.getElementById('similarityBar');
+                const lbl = document.getElementById('scoreLabel');
+                const bdg = document.getElementById('matchBadge');
+
+                lbl.innerText   = `%${pct}`;
+                bar.style.width = `${pct}%`;
+
+                if (pct >= 85) {
+                    bar.className = 'progress-bar similarity-bar bg-success';
+                    bdg.className = 'px-3 py-1 rounded-pill fw-bold match-badge-success';
+                    bdg.innerText = '✅ EŞLEŞİYOR';
+                } else if (pct >= 60) {
+                    bar.className = 'progress-bar similarity-bar bg-warning';
+                    bdg.className = 'px-3 py-1 rounded-pill fw-bold match-badge-warn';
+                    bdg.innerText = '⚠️ KISMI EŞLEŞİYOR';
+                } else {
+                    bar.className = 'progress-bar similarity-bar bg-danger';
+                    bdg.className = 'px-3 py-1 rounded-pill fw-bold match-badge-danger';
+                    bdg.innerText = '❌ EŞLEŞMİYOR';
+                }
+
+            } catch (error) {
+                document.getElementById('loading').style.display = 'none';
+                alert('⚠️ Bir hata oluştu:\n\n' + error.message);
+            }
+        });
+    </script>
+</body>
+</html>
