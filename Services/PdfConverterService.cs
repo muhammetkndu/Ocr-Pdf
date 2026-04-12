@@ -10,7 +10,8 @@ public class PdfConverterService
 
         var settings = new MagickReadSettings
         {
-            Density = new Density(300) // 300 DPI — OCR için net görüntü şart
+            // 400 DPI: OCR ve kutu doğruluğu için önerilen üst band (dosya boyutu artar).
+            Density = new Density(400, 400)
         };
 
         try

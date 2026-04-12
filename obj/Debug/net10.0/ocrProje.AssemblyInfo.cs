@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("ocrProje")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+7139e6296f487af33d52b4c0c0dd837ac41f9518")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+951ed12e2f39bfb4ab5fd09a02e88fc85046d1a9")]
 [assembly: System.Reflection.AssemblyProductAttribute("ocrProje")]
 [assembly: System.Reflection.AssemblyTitleAttribute("ocrProje")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
