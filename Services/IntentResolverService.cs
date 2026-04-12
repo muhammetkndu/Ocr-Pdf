@@ -15,24 +15,7 @@ public class IntentResolverService
 {
     private readonly GeminiService _gemini;
 
-    // ── Yerel Synonym (Eş Anlamlılar) Haritası ────────────────────────────────
-    // Her Canonical Key → kullanıcının yazabileceği ve PDF'te bulunabilecek tüm varyantlar
-    private static readonly Dictionary<string, string[]> _synonymMap = new(StringComparer.OrdinalIgnoreCase)
-    {
-        ["IBAN"]       = ["iban", "hesap no", "banka hesabı", "hesap numarası", "banka numarası", "uluslararası hesap", "tr hesap"],
-        ["TCKN"]       = ["tc", "tckn", "kimlik no", "kimlik numarası", "tc kimlik", "t.c. kimlik no", "tc no", "identity"],
-        ["VKN"]        = ["vergi no", "vkn", "vergi kimlik", "vergi numarası", "vergi kimlik no", "tax"],
-        ["AD_SOYAD"]   = ["isim", "ad soyad", "ad", "soyad", "müşteri adı", "hasta adı", "kişi", "adı soyadı", "name", "müşteri"],
-        ["TUTAR"]      = ["tutar", "miktar", "fiyat", "ücret", "toplam", "para", "bedel", "amount", "total"],
-        ["TARIH"]      = ["tarih", "işlem tarihi", "ne zaman", "düzenlenme", "kesilme tarihi", "date"],
-        ["FATURA_NO"]  = ["fatura", "fatura no", "fatura numarası", "invoice", "invoice no", "fatura kodu"],
-        ["VERGI_DAIRESI"] = ["vergi dairesi", "vd", "vergi ofisi"],
-        ["SORGU_NO"]   = ["sorgu", "sorgu no", "referans", "ref no", "referans no", "reference"],
-        ["KDV"]        = ["kdv", "katma değer", "vergi", "tax", "vat"],
-        ["ALICI"]      = ["alıcı", "gönderilen", "hedef", "recipient", "alıcı adı"],
-        ["GONDEREN"]   = ["gönderen", "gönderici", "sender", "kimden"],
-        ["ACIKLAMA"]   = ["açıklama", "not", "description", "detay", "explanation"],
-    };
+    // Yerel eşanlamlı haritası artık Constants/IntentConfigData.cs dosyasından çekilecektir!
 
     // Stop kelimeler — sorgudan temizlenir, sadece anahtar kelimeler kalır
     private static readonly HashSet<string> _stopWords = new(StringComparer.OrdinalIgnoreCase)
@@ -51,15 +34,18 @@ public class IntentResolverService
     }
 
     /// <summary>
-    /// Verilen canonical alan adı için (örn: "TCKN") bilinen tüm eşanlamlıları döner.
-    /// OCR'da etiket ararken (Label Matching) kullanılır.
+    /// Verilen canonical alan adı ve belge türü için bilinen tüm eşanlamlıları döner.
     /// </summary>
-    public static string[] GetSynonyms(string canonicalField)
+    public static string[] GetSynonyms(string canonicalField, string docType)
     {
-        if (_synonymMap.TryGetValue(canonicalField, out var syns))
+        var config = Constants.IntentConfigData.IntentConfig.ContainsKey(docType) 
+            ? Constants.IntentConfigData.IntentConfig[docType] 
+            : Constants.IntentConfigData.IntentConfig["DIGER"];
+
+        if (config.TryGetValue(canonicalField, out var syns))
             return syns;
         
-        return new[] { canonicalField }; // Bilinmiyorsa kendini dön
+        return new[] { canonicalField }; 
     }
 
     /// <summary>
@@ -74,16 +60,15 @@ public class IntentResolverService
     }
 
     /// <summary>
-    /// Kullanıcının serbest metin sorgusunu sistemde tanımlı 'Canonical Key'lerden birine eşler.
+    /// Kullanıcının serbest metin sorgusunu belgenin türüne göre (DocType) 'Canonical Key'e eşler.
     /// </summary>
-    public async Task<(string ResolvedField, string Method)> ResolveAsync(string userQuery)
+    public async Task<(string ResolvedField, string Method)> ResolveAsync(string userQuery, string docType)
     {
         if (string.IsNullOrWhiteSpace(userQuery))
             throw new ArgumentException("Sorgu boş olamaz.");
 
         // 1. LOCAL MAP KONTROLÜ (En Güvenli ve En Hızlı)
-        // Sorguyu temizle ve eşanlamlılar listesinde ara.
-        var localCandidate = TryLocalMapping(userQuery);
+        var localCandidate = TryLocalMapping(userQuery, docType);
         if (localCandidate != null)
         {
             Console.WriteLine($"[INTENT-LOCAL] '{userQuery}' -> Canonical Key: '{localCandidate}'");
@@ -93,8 +78,12 @@ public class IntentResolverService
         // 2. LLM FALLBACK (Bilinmeyen Vaka)
         Console.WriteLine($"[INTENT-LLM] Yerel eşleşme yok, Gemini'ye soruluyor...");
         
-        // Mevcut Canonical Key'leri LLM'ye bildiriyoruz ki rastgele bir şey uydurmasın.
-        var canonicalKeys = string.Join(", ", _synonymMap.Keys);
+        // Mevcut Canonical Key'leri LLM'ye bildiriyoruz
+        var config = Constants.IntentConfigData.IntentConfig.ContainsKey(docType) 
+            ? Constants.IntentConfigData.IntentConfig[docType] 
+            : Constants.IntentConfigData.IntentConfig["DIGER"];
+        
+        var canonicalKeys = string.Join(", ", config.Keys);
         var llmResult = await _gemini.ResolveIntentCanonicalAsync(userQuery, canonicalKeys);
 
         if (string.IsNullOrWhiteSpace(llmResult))
@@ -104,12 +93,16 @@ public class IntentResolverService
         return (llmResult.Trim().ToUpperInvariant(), "llm");
     }
 
-    private static string? TryLocalMapping(string query)
+    private static string? TryLocalMapping(string query, string docType)
     {
         var words = Tokenize(query);
         var cleanQuery = string.Join(" ", words).ToLowerInvariant();
 
-        foreach (var (canonicalField, synonyms) in _synonymMap)
+        var config = Constants.IntentConfigData.IntentConfig.ContainsKey(docType) 
+            ? Constants.IntentConfigData.IntentConfig[docType] 
+            : Constants.IntentConfigData.IntentConfig["DIGER"];
+
+        foreach (var (canonicalField, synonyms) in config)
         {
             // Kullanıcının yazdığı metnin (veya kelimenin) herhangi bir synonym ile eşleşip eşleşmediğini kontrol ediyoruz.
             // Örneğin: cleanQuery="tc no", synonym="tc no" -> Match!

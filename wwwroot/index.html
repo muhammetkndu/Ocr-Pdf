@@ -26,25 +26,43 @@
         <p class="text-center text-muted mb-4">OCR + Vision AI — Doğal Dil Sorgu | Token Analizi | Güven Skoru</p>
 
         <div class="card shadow-sm p-4 mx-auto" style="max-width: 620px;">
+            <!-- 1. DÖNEM: DOSYA YÜKLEME -->
             <form id="uploadForm">
                 <div class="mb-3">
                     <label class="form-label fw-bold">Belge Yükle (PDF veya Resim)</label>
                     <input type="file" class="form-control" id="file" accept=".pdf, image/*" required>
                 </div>
+                <button type="submit" class="btn btn-primary w-100 fs-5" id="uploadBtn">Sisteme Yükle ve Haritala</button>
+            </form>
+
+            <div id="uploadLoading" class="text-center mt-4" style="display:none;">
+                <div class="spinner-border text-primary" role="status"></div>
+                <p class="mt-2 text-muted">Belge Tesseract tarafından okunuyor ve RAM'e işleniyor... Mükemmel bir sohbet için son hazırlıklar!</p>
+            </div>
+
+            <div id="uploadSuccess" class="alert alert-success mt-3 d-none text-center">
+                <i class="fw-bold">✅ Belge başarıyla belleğe alındı! Türü: <span id="sessDocType"></span></i>
+            </div>
+            
+            <!-- 2. DÖNEM: SORGULAMA SOHBETİ (GİZLİ BAŞLAR) -->
+            <hr class="mt-4 mb-4">
+            <form id="queryForm" class="d-none">
                 <div class="mb-4">
                     <label class="form-label fw-bold">Ne arıyorsun?</label>
-                    <input type="text" class="form-control" id="userQuery"
-                           placeholder="Örn: bana ibanı ver, fatura tutarı nedir, tarih ne?" required>
+                    <div class="input-group">
+                        <input type="text" class="form-control" id="userQuery"
+                            placeholder="Örn: bana ibanı ver, fatura tutarı nedir, tarih ne?" required>
+                        <button type="submit" class="btn btn-success fs-6" id="queryBtn">🚀 Sor</button>
+                    </div>
                     <div class="form-text text-muted">
-                        Doğal dille yazabilirsin — "IBAN", "iban ver misin", "hesap numarası" hepsi çalışır.
+                        Doğal dille yazabilirsin. Belge RAM'de olduğu için OCR tekrar çalışmaz, sonuç anında gelir!
                     </div>
                 </div>
-                <button type="submit" class="btn btn-primary w-100 fs-5">🚀 Hedefi Bul ve Oku</button>
             </form>
 
             <div id="loading" class="text-center mt-4">
-                <div class="spinner-border text-primary" role="status"></div>
-                <p class="mt-2 text-muted">Belge taranıyor ve yapay zekaya gönderiliyor...</p>
+                <div class="spinner-border text-success" role="status"></div>
+                <p class="mt-2 text-muted">Hafızadan bulunup Gemini yapay zekasına gönderiliyor...</p>
             </div>
         </div>
 
@@ -149,21 +167,68 @@
     </div>
 
     <script>
+        let currentSessionId = "";
+
+        // 1. AŞAMA: UPLOAD FORMU
         document.getElementById('uploadForm').addEventListener('submit', async (e) => {
             e.preventDefault();
 
             const fileInput = document.getElementById('file');
-            const userQuery = document.getElementById('userQuery').value;
+            if (fileInput.files.length === 0) return;
 
+            document.getElementById('uploadLoading').style.display = 'block';
+            document.getElementById('uploadBtn').disabled = true;
+            document.getElementById('uploadSuccess').classList.add('d-none');
+            document.getElementById('queryForm').classList.add('d-none');
             document.getElementById('resultSection').classList.add('d-none');
-            document.getElementById('loading').style.display = 'block';
 
             const formData = new FormData();
             formData.append('file', fileInput.files[0]);
-            formData.append('userQuery', userQuery);  // ← artık userQuery
 
             try {
-                const response = await fetch('/api/extract', { method: 'POST', body: formData });
+                const response = await fetch('/api/upload', { method: 'POST', body: formData });
+
+                if (!response.ok) {
+                    const errText = await response.text();
+                    throw new Error(errText || `Sunucu hatası: HTTP ${response.status}`);
+                }
+
+                const r = await response.json();
+                
+                currentSessionId = r.sessionId;
+                document.getElementById('sessDocType').innerText = r.docType;
+
+                document.getElementById('uploadLoading').style.display = 'none';
+                document.getElementById('uploadBtn').disabled = false;
+                document.getElementById('uploadSuccess').classList.remove('d-none');
+                
+                // Sorgu formunu aç
+                document.getElementById('queryForm').classList.remove('d-none');
+                
+            } catch (error) {
+                document.getElementById('uploadLoading').style.display = 'none';
+                document.getElementById('uploadBtn').disabled = false;
+                alert('⚠️ Yükleme Hatası:\n\n' + error.message);
+            }
+        });
+
+        // 2. AŞAMA: QUERY FORMU
+        document.getElementById('queryForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const userQuery = document.getElementById('userQuery').value;
+            if (!currentSessionId || !userQuery) return;
+
+            document.getElementById('resultSection').classList.add('d-none');
+            document.getElementById('loading').style.display = 'block';
+            document.getElementById('queryBtn').disabled = true;
+
+            const formData = new FormData();
+            formData.append('sessionId', currentSessionId);
+            formData.append('userQuery', userQuery);
+
+            try {
+                const response = await fetch('/api/query', { method: 'POST', body: formData });
 
                 if (!response.ok) {
                     const errText = await response.text();
@@ -173,6 +238,7 @@
                 const r = await response.json();
 
                 document.getElementById('loading').style.display = 'none';
+                document.getElementById('queryBtn').disabled = false;
                 document.getElementById('resultSection').classList.remove('d-none');
 
                 // Intent çözümleme bilgisi
@@ -223,7 +289,8 @@
 
             } catch (error) {
                 document.getElementById('loading').style.display = 'none';
-                alert('⚠️ Bir hata oluştu:\n\n' + error.message);
+                document.getElementById('queryBtn').disabled = false;
+                alert('⚠️ Sorgu Hatası:\n\n' + error.message);
             }
         });
     </script>

@@ -54,12 +54,13 @@ public class OcrService
     public (string Base64, string OcrLineText) CropByField(
         string imagePath,
         List<(string Text, Rect Box)> lines,
-        string resolvedField)
+        string resolvedField,
+        string docType)
     {
         if (lines.Count == 0)
             throw new Exception("Belgede hiç metin bulunamadı.");
 
-        var candidates = ScoreCandidates(lines, resolvedField);
+        var candidates = ScoreCandidates(lines, resolvedField, docType);
         
         if (candidates.Count == 0)
             throw new Exception($"'{resolvedField}' belgede bulunamadı.");
@@ -101,10 +102,10 @@ public class OcrService
         return (magickImg.ToBase64(MagickFormat.Png), ocrLineText);
     }
 
-    public (string Base64, string OcrLineText) GetCroppedImageAsBase64(string imagePath, string targetField)
+    public (string Base64, string OcrLineText) GetCroppedImageAsBase64(string imagePath, string targetField, string docType)
     {
         var lines = ScanAllLines(imagePath);
-        return CropByField(imagePath, lines, targetField);
+        return CropByField(imagePath, lines, targetField, docType);
     }
 
     // ── HEURISTIC SCORING ALGORITHM ───────────────────────────────────────────
@@ -119,10 +120,10 @@ public class OcrService
         public List<(string Text, Rect Box)> Lines { get; set; } = new();
     }
 
-    private List<ExtractionCandidate> ScoreCandidates(List<(string Text, Rect Box)> lines, string resolvedField)
+    private List<ExtractionCandidate> ScoreCandidates(List<(string Text, Rect Box)> lines, string resolvedField, string docType)
     {
         var candidates = new List<ExtractionCandidate>();
-        var synonyms = IntentResolverService.GetSynonyms(resolvedField);
+        var synonyms = IntentResolverService.GetSynonyms(resolvedField, docType);
         
         _patternMap.TryGetValue(resolvedField, out var patternRegexStr);
         Regex? patternRegex = null;

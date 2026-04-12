@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
 using ocrProje.Models;
 using ocrProje.Services;
+using Microsoft.Extensions.Caching.Memory;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -17,28 +18,31 @@ builder.Services.AddSingleton<DocumentClassifierService>();
 builder.Services.AddSingleton<AnchorDetectorService>();
 builder.Services.AddSingleton<SmartCropService>();
 
+builder.Services.AddMemoryCache();
+
 var app = builder.Build();
 
 // 2. wwwroot içindeki html/css dosyalarımızı dışarı sunabilmek için
 app.UseStaticFiles();
 
-// 3. Ana API Endpoint'imiz (Front-end buraya istek atacak)
-app.MapPost("/api/extract", async (
+// ==========================================
+// AŞAMA 1: DOSYA YÜKLEME VE TAM TARAMA (UPLOAD & INDEX)
+// ==========================================
+app.MapPost("/api/upload", async (
     [FromServices] PdfConverterService         pdfService,
-    [FromServices] OcrService                  ocrService,
-    [FromServices] GeminiService               geminiService,
-    [FromServices] SimilarityService           similarityService,
-    [FromServices] IntentResolverService       intentService,
     [FromServices] ImagePreprocessingService   prepService,
     [FromServices] DocumentClassifierService   classifierService,
     [FromServices] AnchorDetectorService       anchorService,
-    [FromServices] SmartCropService            cropService,
-    [FromForm] IFormFile file,
-    [FromForm] string userQuery) =>
+    [FromServices] Microsoft.Extensions.Caching.Memory.IMemoryCache cache,
+    [FromForm] IFormFile file) => 
 {
     if (file == null || file.Length == 0) return Results.BadRequest("Dosya yüklenmedi.");
 
-    var tempFilePath = Path.Combine(Path.GetTempPath(), file.FileName);
+    // Guid ile oturuma ozel dosya ismi (Ayni anda birden cok dosyanin cakismasini onler)
+    string sessionId = Guid.NewGuid().ToString();
+    var ext = Path.GetExtension(file.FileName);
+    var tempFilePath = Path.Combine(Path.GetTempPath(), $"{sessionId}{ext}");
+
     using (var stream = new FileStream(tempFilePath, FileMode.Create))
         await file.CopyToAsync(stream);
 
@@ -46,61 +50,112 @@ app.MapPost("/api/extract", async (
     {
         string imagePath = tempFilePath;
 
-        // EĞER PDF İSE: Önce resme çevir
         if (file.FileName.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase))
             imagePath = pdfService.ConvertFirstPageToImage(tempFilePath);
 
+        string preprocessedImage = prepService.PreprocessImageForOcr(imagePath);
+        string docType = classifierService.ClassifyDocument(preprocessedImage);
+
+        // Belgeyi baştan sona RAM'e tarayıp alıyoruz.
+        var allLines = anchorService.ScanEntireDocument(preprocessedImage);
+
+        // RAM'e session olarak at
+        var session = new DocumentSession
+        {
+            SessionId = sessionId,
+            OriginalFilePath = tempFilePath,
+            PreprocessedImagePath = preprocessedImage,
+            DocType = docType,
+            ScannedLines = allLines,
+            CreatedAt = DateTime.UtcNow
+        };
+
+        var cacheOptions = new Microsoft.Extensions.Caching.Memory.MemoryCacheEntryOptions()
+            .SetSlidingExpiration(TimeSpan.FromMinutes(20))
+            .RegisterPostEvictionCallback((key, value, reason, state) =>
+            {
+                // Süresi dolunca temp resimleri sil!
+                if (value is DocumentSession s)
+                {
+                    if (System.IO.File.Exists(s.OriginalFilePath)) System.IO.File.Delete(s.OriginalFilePath);
+                    if (s.OriginalFilePath != s.PreprocessedImagePath && System.IO.File.Exists(s.PreprocessedImagePath)) 
+                        System.IO.File.Delete(s.PreprocessedImagePath);
+                }
+            });
+
+        cache.Set(sessionId, session, cacheOptions);
+
+        return Results.Ok(new { sessionId, docType, message = "Belge başarıyla haritalandı." });
+    }
+    catch (Exception ex)
+    {
+        return Results.Problem($"Yükleme aşamasında hata: {ex.Message}");
+    }
+}).DisableAntiforgery();
+
+// ==========================================
+// AŞAMA 2: SORGULAMA (QUERY - Işık Hızında)
+// ==========================================
+app.MapPost("/api/query", async (
+    [FromServices] OcrService                  ocrService,
+    [FromServices] GeminiService               geminiService,
+    [FromServices] SimilarityService           similarityService,
+    [FromServices] IntentResolverService       intentService,
+    [FromServices] AnchorDetectorService       anchorService,
+    [FromServices] SmartCropService            cropService,
+    [FromServices] Microsoft.Extensions.Caching.Memory.IMemoryCache cache,
+    [FromForm] string sessionId,
+    [FromForm] string userQuery) =>
+{
+    if (string.IsNullOrWhiteSpace(sessionId)) return Results.BadRequest("Session ID boş!");
+    if (string.IsNullOrWhiteSpace(userQuery)) return Results.BadRequest("Soru boş!");
+
+    if (!cache.TryGetValue(sessionId, out var sessionObj) || sessionObj is not DocumentSession session)
+    {
+        return Results.BadRequest("Oturum zaman aşımına uğramış veya geçersiz. Lütfen belgeyi tekrar yükleyin.");
+    }
+
+    try
+    {
         // ── 1. AŞAMA: Intent Çözümleme ────────────────────────────────────────
-        var cleanQuery = intentService.GetCleanQuery(userQuery); // Asıl LLM promptu için
-        var (resolvedField, intentMethod) = await intentService.ResolveAsync(userQuery);
+        var cleanQuery = intentService.GetCleanQuery(userQuery); 
+        var (resolvedField, intentMethod) = await intentService.ResolveAsync(userQuery, session.DocType);
         Console.WriteLine($"[INTENT] '{userQuery}' -> İç Eşleşme (Çıpa Taraması İçin): '{resolvedField}'");
 
-        // ── 2. AŞAMA: Image Preprocessing (Grayscale vb.) ──────────────────────
-        string preprocessedImage = prepService.PreprocessImageForOcr(imagePath);
-
-        // ── 3. AŞAMA: Belge Sınıflandırma (Fast Pass) ─────────────────────────
-        string docType = classifierService.ClassifyDocument(preprocessedImage);
-        Console.WriteLine($"[DOC-TYPE] Tespit Edilen Belge Türü: {docType}");
-
-        // ── 4. AŞAMA: Smart Anchor Detection ──────────────────────────────────
-        // OCR Çıpa araması Canonical Key ile (örn IBAN) tetikleniyor ki synonym haritasından faydalanabilsin.
-        var anchorCoord = anchorService.FindAnchorCoordinate(preprocessedImage, docType, resolvedField);
+        // ── 2. AŞAMA: RAM'den Çıpa Tespiti (Memory Search - OCR GEREKTİRMEZ) ──
+        var anchorCoord = anchorService.FindAnchorInMemory(session.ScannedLines, session.DocType, resolvedField);
         
         string base64Image;
         string ocrLineText = "";
 
         if (anchorCoord != null)
         {
-            // ── 5. AŞAMA: Dinamik Kırpma (Sağa Doğru Genişletilmiş) ─────────────
-            var cropResult = cropService.CropAnchorRowAsBase64(preprocessedImage, anchorCoord);
+            // ── 3. AŞAMA: Dinamik Kırpma (Disk'teki hazır resimden) ─────────────
+            var cropResult = cropService.CropAnchorRowAsBase64(session.PreprocessedImagePath, anchorCoord);
             base64Image = cropResult.Base64;
             ocrLineText = cropResult.CroppedOcrText; // Tümüyle kırpık bölgenin okunmuş hali
         }
         else
         {
-            Console.WriteLine("[UYARI] Hedef veri için Çıpa bulunamadı. Eski Heuristic metoda geri düşülüyor...");
-            var allLines = ocrService.ScanAllLines(preprocessedImage);
-            var fallbackResult = ocrService.CropByField(preprocessedImage, allLines, resolvedField);
+            Console.WriteLine("[UYARI] Hafızada Hedef veri için Çıpa bulunamadı. Eski Heuristic metoda geri düşülüyor...");
+            var allLines = ocrService.ScanAllLines(session.PreprocessedImagePath);
+            var fallbackResult = ocrService.CropByField(session.PreprocessedImagePath, allLines, resolvedField, session.DocType);
             base64Image = fallbackResult.Base64;
             ocrLineText = fallbackResult.OcrLineText;
         }
 
-        // ── 6. AŞAMA: Gemini'ye Kırpılmış Görüntüyü Gönder ────────────────────
-        // LLM'e Canonical Key'i (IBAN) değil, kullanıcının kendi tabirini (hesap no) soruyoruz ki onu döndürsün.
+        // ── 4. AŞAMA: Gemini'ye Kırpılmış Görüntüyü Gönder ────────────────────
         var (jsonResult, inputTokens, outputTokens) =
             await geminiService.GetJsonFromImageAsync(base64Image, cleanQuery);
 
-        // ── 7. AŞAMA: Benzerlik Analizi ───────────────────────────────────────
+        // ── 5. AŞAMA: Benzerlik Analizi ───────────────────────────────────────
         string llmValue = similarityService.ExtractValueFromJson(jsonResult);
         double score    = similarityService.ComputeSimilarity(ocrLineText, llmValue);
         bool   isMatch  = similarityService.IsMatch(score);
 
         Console.WriteLine($"[BENZERLİK] OCR:'{ocrLineText}'  LLM:'{llmValue}'  Score:{score:P1}  Match:{isMatch}");
 
-        // Geçici dosyaları temizle
-        if (System.IO.File.Exists(tempFilePath)) System.IO.File.Delete(tempFilePath);
-        if (imagePath != tempFilePath && System.IO.File.Exists(imagePath)) System.IO.File.Delete(imagePath);
-        if (System.IO.File.Exists(preprocessedImage)) System.IO.File.Delete(preprocessedImage);
+        // Dosya silmiyoruz çünkü Session hala aktif (15 dk ömrü var)
 
         return Results.Ok(new ExtractionResponse
         {
