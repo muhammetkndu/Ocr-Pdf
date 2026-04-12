@@ -13,14 +13,7 @@ public class AnchorDetectorService
 {
     private readonly string _tessDataPath = Path.Combine(Environment.CurrentDirectory, "tessdata");
 
-    // Belge türlerine göre Çıpa (Anchor) konfigürasyonu
-    private readonly Dictionary<string, List<string>> _anchorConfig = new(StringComparer.OrdinalIgnoreCase)
-    {
-        ["DEKONT"] = new List<string> { "tutar", "meblağ", "işlem tarihi", "iban", "açıklama", "hesap no" },
-        ["FATURA"] = new List<string> { "vkn", "genel toplam", "fatura no", "kdv matrahı", "ödenecek" },
-        ["MIZAN"]  = new List<string> { "borç", "alacak", "bakiye", "hesap kodu" },
-        ["DIGER"]  = new List<string> { "tutar", "toplam", "tarih", "iban", "tc kimlik" }
-    };
+    // Belge türlerine göre Çıpa (Anchor) konfigürasyonu Constants/AnchorConfigData.cs dosyasına taşınmıştır.
 
     /// <summary>
     /// Belgeyi PageIteratorLevel.TextLine olarak okuyup, içerisinde çıpa (anchor) arar ve bulduğu ilk iyi eşleşmenin koordinatlarını döndürür.
@@ -28,22 +21,26 @@ public class AnchorDetectorService
     public AnchorCoordinate? FindAnchorCoordinate(string imagePath, string docType, string targetField)
     {
         // 1. Hedef alan için uygun çıpa kelimesini bulalım. 
-        // Kullanıcı "ibanı ver" dediğinde targetField="IBAN" geliyor.
-        List<string> anchorsToCheck;
+        HashSet<string> anchorsToCheck = new(StringComparer.OrdinalIgnoreCase);
+        string targetAnchor = targetField.ToLowerInvariant();
         
-        string targetAnchor = targetField.ToLowerInvariant(); // Örn "iban"
-        var possibleAnchors = _anchorConfig.ContainsKey(docType) ? _anchorConfig[docType] : _anchorConfig["DIGER"];
+        // Önce IntentResolver'dan eş anlamlılarını ekliyoruz ("doktor adı" ise sadece kendisi, "TC" ise "tckn" vs. döner)
+        var synonyms = IntentResolverService.GetSynonyms(targetField);
+        foreach (var syn in synonyms) anchorsToCheck.Add(syn);
 
-        // Hedef field zaten anchor listemizde var mı?
-        if (possibleAnchors.Any(a => targetAnchor.Contains(a) || a.Contains(targetAnchor)))
+        var possibleAnchors = Constants.AnchorConfigData.AnchorConfig.ContainsKey(docType) 
+            ? Constants.AnchorConfigData.AnchorConfig[docType] 
+            : Constants.AnchorConfigData.AnchorConfig["DIGER"];
+
+        // Belge türünün resmi konfigine bakarak, kullanıcının yazdığı terime (veya eşanlamlılarına) benzeyen her çıpayı havuza al:
+        // Eğer config'de "doktor" varsa ve bizde "doktor adı" varsa, "doktor" kelimesi havuza eklenecek.
+        // Listeyi silmek (overwrite) yerine KAPSAM GENİŞLETİLDİ.
+        foreach (var a in possibleAnchors)
         {
-            anchorsToCheck = new List<string> { targetAnchor };
-        }
-        else
-        {
-            // Eğer field özel olarak tanınmıyorsa mecburen ilgili kelimelerin eş anlamlılarına veya kendisine bakacağız.
-            var synonyms = IntentResolverService.GetSynonyms(targetField);
-            anchorsToCheck = synonyms.ToList();
+            if (anchorsToCheck.Any(syn => syn.Contains(a) || a.Contains(syn)))
+            {
+                anchorsToCheck.Add(a);
+            }
         }
 
         // STRICT ANCHOR FILTERING
