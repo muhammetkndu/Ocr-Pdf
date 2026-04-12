@@ -72,9 +72,12 @@
 
             <!-- Intent resolution bilgisi -->
             <div class="text-center mb-4">
-                <span class="text-muted small me-2">Anlanan alan:</span>
-                <span class="fw-bold me-2" id="resolvedFieldLabel">—</span>
+                <div class="small text-muted mb-1">Standart alan (canonical)</div>
+                <div class="fw-bold font-monospace mb-1" id="canonicalFieldLabel">—</div>
+                <div class="small text-muted mb-1">Sorgu özü</div>
+                <div class="fw-semibold me-2 d-inline" id="userQueryCleanLabel">—</div>
                 <span class="intent-chip" id="intentMethodChip">—</span>
+                <div class="small text-secondary mt-2 d-none" id="anchorMatchNote"></div>
             </div>
 
             <!-- Satır 1: Kırpılan resim + Gemini JSON -->
@@ -242,7 +245,16 @@
                 document.getElementById('resultSection').classList.remove('d-none');
 
                 // Intent çözümleme bilgisi
-                document.getElementById('resolvedFieldLabel').innerText = r.resolvedField || r.fieldName || '—';
+                document.getElementById('canonicalFieldLabel').innerText = r.canonicalField || r.fieldName || '—';
+                document.getElementById('userQueryCleanLabel').innerText = r.userQueryClean || r.resolvedField || '—';
+                const noteEl = document.getElementById('anchorMatchNote');
+                if (r.anchorMatchNote) {
+                    noteEl.textContent = r.anchorMatchNote;
+                    noteEl.classList.remove('d-none');
+                } else {
+                    noteEl.textContent = '';
+                    noteEl.classList.add('d-none');
+                }
 
                 const chip = document.getElementById('intentMethodChip');
                 const methodLabels = { local: '⚡ yerel eşleşme', llm: '🤖 LLM çözümledi', direct: '🎯 doğrudan' };

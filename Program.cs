@@ -123,7 +123,7 @@ app.MapPost("/api/query", async (
         Console.WriteLine($"[INTENT] '{userQuery}' -> İç Eşleşme (Çıpa Taraması İçin): '{resolvedField}'");
 
         // ── 2. AŞAMA: RAM'den Çıpa Tespiti (Memory Search - OCR GEREKTİRMEZ) ──
-        var anchorCoord = anchorService.FindAnchorInMemory(session.ScannedLines, session.DocType, resolvedField);
+        var (anchorCoord, anchorNote) = anchorService.FindAnchorInMemory(session.ScannedLines, session.DocType, resolvedField);
         
         string base64Image;
         string ocrLineText = "";
@@ -137,9 +137,9 @@ app.MapPost("/api/query", async (
         }
         else
         {
-            Console.WriteLine("[UYARI] Hafızada Hedef veri için Çıpa bulunamadı. Eski Heuristic metoda geri düşülüyor...");
-            var allLines = ocrService.ScanAllLines(session.PreprocessedImagePath);
-            var fallbackResult = ocrService.CropByField(session.PreprocessedImagePath, allLines, resolvedField, session.DocType);
+            Console.WriteLine("[UYARI] Hafızada Hedef veri için Çıpa bulunamadı. Heuristic metoda geri düşülüyor (oturum OCR satırları, tam sayfa yeniden tarama yok).");
+            var sessionLines = AnchorDetectorService.ToLineTuples(session.ScannedLines);
+            var fallbackResult = ocrService.CropByField(session.PreprocessedImagePath, sessionLines, resolvedField, session.DocType);
             base64Image = fallbackResult.Base64;
             ocrLineText = fallbackResult.OcrLineText;
         }
@@ -161,11 +161,14 @@ app.MapPost("/api/query", async (
         {
             // Intent
             UserQuery          = userQuery,
-            ResolvedField      = cleanQuery, // Ekranda da kullanıcının girdiği kelime görülecek
+            CanonicalField     = resolvedField,
+            UserQueryClean     = cleanQuery,
+            ResolvedField      = cleanQuery,
             IntentMethod       = intentMethod,
+            AnchorMatchNote    = anchorNote,
 
             // Temel
-            FieldName          = cleanQuery,
+            FieldName          = resolvedField,
             ExtractedValue     = jsonResult,
             CroppedImageBase64 = base64Image,
 

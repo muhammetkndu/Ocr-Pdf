@@ -50,6 +50,41 @@ public class DocumentClassifierService
             {
                 return "MIZAN";
             }
+            if (headerText.Contains("istirahat") || headerText.Contains("sağlık raporu") || headerText.Contains("saglik raporu")
+                || headerText.Contains("iş göremez") || headerText.Contains("is goremez") || headerText.Contains("hekim rapor"))
+            {
+                return "ISTIRAHAT_RAPORU";
+            }
+            if (headerText.Contains("bordro") || headerText.Contains("maaş") || headerText.Contains("maas")
+                || headerText.Contains("ücret pusulası") || headerText.Contains("ucret pusulasi"))
+            {
+                return "BORDRO";
+            }
+            if (headerText.Contains("tapu") || headerText.Contains("taşınmaz") || headerText.Contains("tasinmaz")
+                || headerText.Contains("kadastro") || headerText.Contains("parsel"))
+            {
+                return "TAPU_SENEDI";
+            }
+            if (headerText.Contains("noter") || headerText.Contains("noterlik") || headerText.Contains("vekaletname")
+                || headerText.Contains("yevmiye"))
+            {
+                return "NOTER";
+            }
+            if (headerText.Contains("mahkeme") || headerText.Contains("karar") || headerText.Contains("hukuk mahkemesi")
+                || headerText.Contains("asliye") || headerText.Contains("temyiz"))
+            {
+                return "MAHKEME_KARARI";
+            }
+            if (headerText.Contains("ekstre") || headerText.Contains("kredi kartı") || headerText.Contains("kredi karti")
+                || headerText.Contains("bonus") || headerText.Contains("worldcard"))
+            {
+                return "KREDI_KARTI_EKSTRESI";
+            }
+            if (headerText.Contains("konşimento") || headerText.Contains("konsimento") || headerText.Contains("bill of lading")
+                || headerText.Contains("cmr") || headerText.Contains("b/l"))
+            {
+                return "KONSIMENTO";
+            }
 
             // Varsayılan
             return "DIGER";

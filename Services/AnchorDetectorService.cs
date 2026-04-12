@@ -50,67 +50,88 @@ public class AnchorDetectorService
     }
 
     /// <summary>
-    /// Hafızadaki taranmış satırlar üzerinden Çıpa bulur. Tesseract ÇALIŞTIRMAZ. 
-    /// İnanılmaz Hızlıdır (0.001ms).
+    /// Oturum satırlarını heuristic kırpma için (string, Rect) listesine çevirir.
     /// </summary>
-    public AnchorCoordinate? FindAnchorInMemory(List<AnchorCoordinate> allLines, string docType, string targetField)
+    public static List<(string Text, Rect Box)> ToLineTuples(List<AnchorCoordinate> scannedLines) =>
+        OcrService.ToLineTuplesFromSession(scannedLines);
+
+    /// <summary>
+    /// Hafızadaki taranmış satırlar üzerinden Çıpa bulur. Tesseract ÇALIŞTIRMAZ.
+    /// Birden fazla aday satırda regex (IBAN/TCKN vb.) ve en uzun eşleşen çıpa metni ile skorlar.
+    /// </summary>
+    public (AnchorCoordinate? Match, string? SelectionNote) FindAnchorInMemory(
+        List<AnchorCoordinate> allLines, string docType, string targetField)
     {
-        // 1. Hedef alan için uygun çıpa kelimesini bulalım. 
         HashSet<string> anchorsToCheck = new(StringComparer.OrdinalIgnoreCase);
-        string targetAnchor = targetField.ToLowerInvariant();
-        
-        // Önce IntentResolver'dan eş anlamlılarını ekliyoruz ("doktor adı" ise sadece kendisi, "TC" ise "tckn" vs. döner)
         var synonyms = IntentResolverService.GetSynonyms(targetField, docType);
         foreach (var syn in synonyms) anchorsToCheck.Add(syn);
 
-        // STRICT ANCHOR FILTERING
-        // Sistem jenerik kelimelere atlamasın diye filtre, ancak senin listende "il", "ad", "yaş" gibi kısa hedefler de var.
-        var allowList = new string[] { "iban", "vkn", "tckn", "tc", "kdv", "tax", "il", "ad", "yaş", "tel", "cep", "mah", "mah.", "ky.", "no", "m2" };
+        var allowList = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "iban", "vkn", "tckn", "tc", "kdv", "tax", "il", "ad", "yaş", "tel", "cep", "mah", "mah.", "ky.", "no", "m2"
+        };
 
         var strictAnchors = new List<string>();
         foreach (var a in anchorsToCheck)
         {
-            // Eğer aranan kelime allow listesindeyse VEYA en az 3 harfliyse VEYA içinde boşluk varsa ("ad soyad" gibi) aramaya izin ver
-            if (allowList.Contains(a)) 
-            {
+            if (allowList.Contains(a))
                 strictAnchors.Add(a);
-            }
-            else if (a.Contains(" ") || a.Length >= 3) 
-            {
+            else if (a.Contains(' ') || a.Length >= 3)
                 strictAnchors.Add(a);
-            }
-        }
-        
-        // Eğer her şey filtrelendiyse güvenlik amaçlı ilk kelimeyi geri ekle
-        if (!strictAnchors.Any())
-        {
-            strictAnchors.Add(anchorsToCheck.First());
         }
 
-        // OCR MOTORU YOK - Hafızadaki Satırlarda Geziyoruz
+        if (strictAnchors.Count == 0)
+            strictAnchors.Add(synonyms[0]);
+
+        var patternRx = OcrService.GetPatternRegexForCanonicalField(targetField);
+
+        var scored = new List<(AnchorCoordinate coord, double score, string matchedAnchor)>();
+
         foreach (var line in allLines)
         {
             string lineText = line.LineText;
-
-            // Satırın içinde çıpalardan biri var mı?
+            string? bestOnLine = null;
+            var bestLen = 0;
             foreach (var anchor in strictAnchors)
             {
-                string cleanAnchor = anchor.ToLowerInvariant();
-                // Ufak Regex veya Contains ile arama
-                if (lineText.Contains(cleanAnchor))
+                var cleanAnchor = anchor.ToLowerInvariant();
+                if (lineText.Contains(cleanAnchor) && cleanAnchor.Length > bestLen)
                 {
-                    Console.WriteLine($"[ANCHOR DETECTED IN MEMORY] Bulundu: {cleanAnchor} satırı: '{lineText}' Koordinat: X:{line.Box.X1} Y:{line.Box.Y1}");
-                    
-                    return new AnchorCoordinate 
-                    { 
-                        AnchorWord = cleanAnchor, 
-                        Box = line.Box, 
-                        LineText = lineText 
-                    };
+                    bestLen = cleanAnchor.Length;
+                    bestOnLine = cleanAnchor;
                 }
             }
+
+            if (bestOnLine == null) continue;
+
+            double score = bestLen;
+            if (patternRx?.IsMatch(lineText) == true)
+                score += 1000;
+            score -= line.Box.Y1 * 0.001;
+
+            scored.Add((new AnchorCoordinate
+            {
+                AnchorWord = bestOnLine,
+                Box = line.Box,
+                LineText = lineText
+            }, score, bestOnLine));
         }
 
-        return null;
+        if (scored.Count == 0)
+            return (null, null);
+
+        var best = scored
+            .OrderByDescending(x => x.score)
+            .ThenBy(x => x.coord.Box.Y1)
+            .First();
+
+        Console.WriteLine(
+            $"[ANCHOR DETECTED IN MEMORY] Seçilen: '{best.matchedAnchor}' skor={best.score:F1} satır='{best.coord.LineText}' Y:{best.coord.Box.Y1}");
+
+        string? note = scored.Count > 1
+            ? $"{scored.Count} aday satır; en yüksek skor seçildi (çıpa uzunluğu + varsa desen eşleşmesi)."
+            : null;
+
+        return (best.coord, note);
     }
 }

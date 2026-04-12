@@ -93,26 +93,95 @@ public class IntentResolverService
         return (llmResult.Trim().ToUpperInvariant(), "llm");
     }
 
+    // Kısa eşanlamlılar: yalnızca cleanQuery içinde ayrı bir sözcük olarak geçerse yerel eşleşmeye izin verilir.
+    private static readonly HashSet<string> ShortAmbiguousSynonyms = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "no", "il", "ad", "tel", "tc", "vd", "ay", "m2", "ky", "mah"
+    };
+
     private static string? TryLocalMapping(string query, string docType)
     {
         var words = Tokenize(query);
         var cleanQuery = string.Join(" ", words).ToLowerInvariant();
+        if (string.IsNullOrEmpty(cleanQuery))
+            return null;
 
         var config = Constants.IntentConfigData.IntentConfig.ContainsKey(docType) 
             ? Constants.IntentConfigData.IntentConfig[docType] 
             : Constants.IntentConfigData.IntentConfig["DIGER"];
 
+        var matches = new List<(string Field, int Quality)>();
+
         foreach (var (canonicalField, synonyms) in config)
         {
-            // Kullanıcının yazdığı metnin (veya kelimenin) herhangi bir synonym ile eşleşip eşleşmediğini kontrol ediyoruz.
-            // Örneğin: cleanQuery="tc no", synonym="tc no" -> Match!
             foreach (var synonym in synonyms)
             {
-                if (cleanQuery.Contains(synonym.ToLowerInvariant()) || synonym.ToLowerInvariant().Contains(cleanQuery))
-                    return canonicalField;
+                var s = synonym.ToLowerInvariant();
+                if (s.Length < 2)
+                    continue;
+                if (!PassesShortSynonymGate(s, cleanQuery))
+                    continue;
+
+                var q = MatchQuality(cleanQuery, s);
+                if (q <= 0)
+                    continue;
+                matches.Add((canonicalField, q));
             }
         }
-        return null;
+
+        if (matches.Count == 0)
+            return null;
+
+        var perFieldBest = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (field, q) in matches)
+        {
+            if (!perFieldBest.TryGetValue(field, out var cur) || q > cur)
+                perFieldBest[field] = q;
+        }
+
+        var globalMax = perFieldBest.Values.Max();
+        var winners = perFieldBest.Where(kv => kv.Value == globalMax).Select(kv => kv.Key).Distinct().ToList();
+        if (winners.Count != 1)
+        {
+            Console.WriteLine($"[INTENT-LOCAL] Belirsizlik: {winners.Count} canonical aday eşit skor; LLM'e bırakılıyor.");
+            return null;
+        }
+
+        return winners[0];
+    }
+
+    private static int MatchQuality(string cleanQuery, string synonymLower)
+    {
+        if (cleanQuery == synonymLower)
+            return 100_000 + synonymLower.Length;
+        if (cleanQuery.Contains(synonymLower, StringComparison.Ordinal))
+            return 50_000 + synonymLower.Length * 100;
+        if (synonymLower.Contains(cleanQuery, StringComparison.Ordinal))
+            return 10_000 + cleanQuery.Length * 100;
+        return 0;
+    }
+
+    private static bool PassesShortSynonymGate(string synonymLower, string cleanQuery)
+    {
+        if (synonymLower.Length > 3)
+            return true;
+        if (!ShortAmbiguousSynonyms.Contains(synonymLower))
+            return true;
+
+        var tokens = Regex.Split(cleanQuery.Trim(), @"\s+")
+            .Where(t => t.Length > 0)
+            .Select(NormalizeTokenForGate)
+            .ToList();
+
+        return tokens.Any(t => t.Equals(synonymLower, StringComparison.Ordinal));
+    }
+
+    private static string NormalizeTokenForGate(string token)
+    {
+        var t = token.ToLowerInvariant();
+        t = Regex.Replace(t, @"^[^\p{L}\p{N}]+", "");
+        t = Regex.Replace(t, @"[^\p{L}\p{N}]+$", "");
+        return t;
     }
 
     private static List<string> Tokenize(string query)

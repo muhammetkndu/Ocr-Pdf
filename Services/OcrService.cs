@@ -20,6 +20,34 @@ public class OcrService
         ["FATURA_NO"]   = @"(?i)[A-Z0-9]{16}\b",           // Örn: E-Arşiv GIB2020...
     };
 
+    /// <summary>
+    /// Uzun canonical alan adlarını (örn. ALICI_IBAN) ilgili pattern anahtarına bağlar; çıpa skorlama ve heuristic için.
+    /// </summary>
+    public static Regex? GetPatternRegexForCanonicalField(string resolvedField)
+    {
+        if (_patternMap.TryGetValue(resolvedField, out var direct))
+            return new Regex(direct, RegexOptions.Compiled);
+
+        var u = resolvedField.ToUpperInvariant();
+        string? key = null;
+        if (u.Contains("IBAN")) key = "IBAN";
+        else if (u.Contains("TCKN")) key = "TCKN";
+        else if (u.Contains("VKN")) key = "VKN";
+        else if (u.Contains("FATURA_NO") || u.Contains("IRSALIYE_NO") || u.Contains("DEKONT_NO") || u.Contains("PROTOKOL_NO") || u.Contains("YEVMIYE_NO"))
+            key = "FATURA_NO";
+        else if (u.Contains("KDV") && (u.Contains("TUTAR") || u.Contains("HESAPLANAN"))) key = "KDV";
+        else if (u.Contains("TUTAR") || u.Contains("TUTARI") || u.Contains("MEBL") || u.Contains("ODENECEK")) key = "TUTAR";
+        else if (u.Contains("TARIH") || u.Contains("TARIHI") || u.Contains("VALOR") || u.Contains("VADE")) key = "TARIH";
+
+        if (key != null && _patternMap.TryGetValue(key, out var pat))
+            return new Regex(pat, RegexOptions.Compiled);
+        return null;
+    }
+
+    /// <summary>Oturum belleğindeki satırları <see cref="CropByField"/> girişi için dönüştürür.</summary>
+    public static List<(string Text, Rect Box)> ToLineTuplesFromSession(IEnumerable<AnchorCoordinate> scannedLines) =>
+        scannedLines.Select(a => (a.LineText, a.Box)).ToList();
+
     // ── PUBLIC API ────────────────────────────────────────────────────────────
 
     public List<(string Text, Rect Box)> ScanAllLines(string imagePath)

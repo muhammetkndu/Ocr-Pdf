@@ -4,11 +4,19 @@ namespace ocrProje.Models;
 public class ExtractionResponse
 {
     // Kullanıcı girişi & intent çözümleme
-    public string UserQuery        { get; set; } = "";   // "bana ibanı ver misin"
-    public string ResolvedField    { get; set; } = "";   // "IBAN"  (OCR'da aranacak)
-    public string IntentMethod     { get; set; } = "";   // "local" | "llm"
+    public string UserQuery        { get; set; } = "";
+    /// <summary>Standart alan anahtarı (örn. ALICI_IBAN, HASTA_TCKN).</summary>
+    public string CanonicalField   { get; set; } = "";
+    /// <summary>Stop-word temizlenmiş kullanıcı ifadesi; vision prompt ile uyumludur.</summary>
+    public string UserQueryClean   { get; set; } = "";
+    /// <summary>Eski istemciler için: genelde <see cref="UserQueryClean"/> ile aynı.</summary>
+    public string ResolvedField    { get; set; } = "";
+    public string IntentMethod     { get; set; } = "";
+    /// <summary>Çoklu çıpa adayında kısa açıklama; tek adayda null olabilir.</summary>
+    public string? AnchorMatchNote { get; set; }
 
     // Temel alanlar
+    /// <summary>Çıkarılan mantıksal alan adı (canonical).</summary>
     public string FieldName            { get; set; } = "";
     public string ExtractedValue       { get; set; } = "";   // Gemini'nin döndürdüğü ham JSON
     public string CroppedImageBase64   { get; set; } = "";
