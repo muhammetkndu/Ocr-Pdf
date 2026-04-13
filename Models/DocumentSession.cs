@@ -6,6 +6,7 @@ public class DocumentSession
 {
     public string SessionId { get; set; } = Guid.NewGuid().ToString();
     public string OriginalFilePath { get; set; } = "";
+    public string IntermediateImagePath { get; set; } = "";
     public string PreprocessedImagePath { get; set; } = "";
     public string DocType { get; set; } = "DIGER";
     

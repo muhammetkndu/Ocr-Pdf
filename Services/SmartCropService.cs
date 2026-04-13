@@ -55,7 +55,7 @@ public class SmartCropService
         var geometry = new MagickGeometry(xStart, y, (uint)w, (uint)h) { IgnoreAspectRatio = true };
         magickImg.Crop(geometry);
 
-        var croppedPath = imagePath + "_cropped.png";
+        var croppedPath = Path.Combine(Path.GetTempPath(), $"ocr_cropped_{Guid.NewGuid():N}.png");
         magickImg.Write(croppedPath);
 
         string croppedOcrText = "";

@@ -89,8 +89,12 @@ public class IntentResolverService
         if (string.IsNullOrWhiteSpace(llmResult))
             throw new Exception($"Intent çözümlenemedi. Lütfen 'tc no', 'hasta adı' gibi daha net belirtin.");
 
-        Console.WriteLine($"[INTENT-LLM] '{userQuery}' -> Canonical Key: '{llmResult}'");
-        return (llmResult.Trim().ToUpperInvariant(), "llm");
+        var normalized = llmResult.Trim().ToUpperInvariant();
+        if (!config.ContainsKey(normalized))
+            throw new Exception($"Intent çözümü geçersiz: '{normalized}'. Lütfen alanı daha net yazın.");
+
+        Console.WriteLine($"[INTENT-LLM] '{userQuery}' -> Canonical Key: '{normalized}'");
+        return (normalized, "llm");
     }
 
     // Kısa eşanlamlılar: yalnızca cleanQuery içinde ayrı bir sözcük olarak geçerse yerel eşleşmeye izin verilir.

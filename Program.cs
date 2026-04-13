@@ -37,6 +37,7 @@ app.MapPost("/api/upload", async (
     [FromForm] IFormFile file) => 
 {
     if (file == null || file.Length == 0) return Results.BadRequest("Dosya yüklenmedi.");
+    if (file.Length > 20 * 1024 * 1024) return Results.BadRequest("Dosya çok büyük. Maksimum 20MB yükleyin.");
 
     // Guid ile oturuma ozel dosya ismi (Ayni anda birden cok dosyanin cakismasini onler)
     string sessionId = Guid.NewGuid().ToString();
@@ -49,9 +50,13 @@ app.MapPost("/api/upload", async (
     try
     {
         string imagePath = tempFilePath;
+        string intermediateImagePath = tempFilePath;
 
         if (file.FileName.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase))
+        {
             imagePath = pdfService.ConvertFirstPageToImage(tempFilePath);
+            intermediateImagePath = imagePath;
+        }
 
         string preprocessedImage = prepService.PreprocessImageForOcr(imagePath);
         string docType = classifierService.ClassifyDocument(preprocessedImage);
@@ -64,6 +69,7 @@ app.MapPost("/api/upload", async (
         {
             SessionId = sessionId,
             OriginalFilePath = tempFilePath,
+            IntermediateImagePath = intermediateImagePath,
             PreprocessedImagePath = preprocessedImage,
             DocType = docType,
             ScannedLines = allLines,
@@ -78,6 +84,10 @@ app.MapPost("/api/upload", async (
                 if (value is DocumentSession s)
                 {
                     if (System.IO.File.Exists(s.OriginalFilePath)) System.IO.File.Delete(s.OriginalFilePath);
+                    if (s.IntermediateImagePath != s.OriginalFilePath &&
+                        s.IntermediateImagePath != s.PreprocessedImagePath &&
+                        System.IO.File.Exists(s.IntermediateImagePath))
+                        System.IO.File.Delete(s.IntermediateImagePath);
                     if (s.OriginalFilePath != s.PreprocessedImagePath && System.IO.File.Exists(s.PreprocessedImagePath)) 
                         System.IO.File.Delete(s.PreprocessedImagePath);
                 }
@@ -89,7 +99,8 @@ app.MapPost("/api/upload", async (
     }
     catch (Exception ex)
     {
-        return Results.Problem($"Yükleme aşamasında hata: {ex.Message}");
+        Console.WriteLine($"[UPLOAD-ERROR] {ex.Message}");
+        return Results.Problem("Yükleme aşamasında hata oluştu.");
     }
 }).DisableAntiforgery();
 
@@ -188,7 +199,8 @@ app.MapPost("/api/query", async (
     }
     catch (Exception ex)
     {
-        return Results.Problem($"Bir hata oluştu knk: {ex.Message}");
+        Console.WriteLine($"[QUERY-ERROR] {ex.Message}");
+        return Results.Problem("Sorgu işlenirken bir hata oluştu.");
     }
 }).DisableAntiforgery();
 

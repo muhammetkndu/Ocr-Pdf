@@ -34,6 +34,3 @@ public class ExtractionResponse
     public double SimilarityScore      { get; set; }   // 0.0 → 1.0
     public bool   IsMatch              { get; set; }   // score >= 0.85
 }
-
-// ── OCR yardımcı model ────────────────────────────────────────────────────────
-public record WordCoordinate(int X, int Y, int Width, int Height);

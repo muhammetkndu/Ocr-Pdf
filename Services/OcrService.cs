@@ -6,8 +6,6 @@ namespace ocrProje.Services;
 
 public class OcrService
 {
-    private readonly string _tessDataPath = Path.Combine(Environment.CurrentDirectory, "tessdata");
-
     // Canonical alanlara karşılık gelen Regex pattern'leri (Pattern Matching)
     private static readonly Dictionary<string, string> _patternMap = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -49,32 +47,6 @@ public class OcrService
         scannedLines.Select(a => (a.LineText, a.Box)).ToList();
 
     // ── PUBLIC API ────────────────────────────────────────────────────────────
-
-    public List<(string Text, Rect Box)> ScanAllLines(string imagePath)
-    {
-        using var engine = new TesseractEngine(_tessDataPath, "tur", EngineMode.Default);
-        using var img    = Pix.LoadFromFile(imagePath);
-        using var page   = engine.Process(img);
-
-        var lines = new List<(string Text, Rect Box)>();
-
-        using (var iter = page.GetIterator())
-        {
-            iter.Begin();
-            do
-            {
-                string lineText = iter.GetText(PageIteratorLevel.TextLine) ?? "";
-                if (!string.IsNullOrWhiteSpace(lineText) &&
-                    iter.TryGetBoundingBox(PageIteratorLevel.TextLine, out Rect rect))
-                {
-                    lines.Add((lineText.Trim(), rect));
-                    // Console.WriteLine($"[OCR Satır]: {lineText.Trim()}");
-                }
-            } while (iter.Next(PageIteratorLevel.TextLine));
-        }
-
-        return lines;
-    }
 
     /// <summary>
     /// Heuristic Scoring (Pattern, Label, Yakınlık) algoritması ile en olası alanı bulur ve kırpar.
@@ -128,12 +100,6 @@ public class OcrService
         magickImg.Crop(geometry);
 
         return (magickImg.ToBase64(MagickFormat.Png), ocrLineText);
-    }
-
-    public (string Base64, string OcrLineText) GetCroppedImageAsBase64(string imagePath, string targetField, string docType)
-    {
-        var lines = ScanAllLines(imagePath);
-        return CropByField(imagePath, lines, targetField, docType);
     }
 
     // ── HEURISTIC SCORING ALGORITHM ───────────────────────────────────────────
