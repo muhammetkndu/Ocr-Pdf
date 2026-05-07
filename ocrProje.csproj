@@ -7,6 +7,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="dotenv.net" Version="4.0.2" />
     <PackageReference Include="Google.GenAI" Version="1.6.1" />
     <PackageReference Include="Magick.NET-Q8-AnyCPU" Version="14.11.1" />
     <!-- Mscc.GenerativeAI kütüphanesi kaldırıldı: GeminiService raw HttpClient kullanıyor -->

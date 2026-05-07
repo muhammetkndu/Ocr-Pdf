@@ -2,8 +2,19 @@ using Microsoft.AspNetCore.Mvc;
 using ocrProje.Models;
 using ocrProje.Services;
 using Microsoft.Extensions.Caching.Memory;
+using dotenv.net;
+
+// .env dosyasından environment variable'ları yükle
+DotEnv.Load();
 
 var builder = WebApplication.CreateBuilder(args);
+
+// .env'den okunan GEMINI_API_KEY'i configuration'a aktar
+var geminiKey = Environment.GetEnvironmentVariable("GEMINI_API_KEY");
+if (!string.IsNullOrEmpty(geminiKey))
+{
+    builder.Configuration["GeminiApiKey"] = geminiKey;
+}
 
 // 1. Servislerimizi sisteme tanıtıyoruz (Dependency Injection)
 builder.Services.AddSingleton<PdfConverterService>();

@@ -11,7 +11,7 @@ public class GeminiService
 
     public GeminiService(IConfiguration config)
     {
-        _apiKey = config["GeminiApiKey"] ?? throw new Exception("Gemini API Key eksik! appsettings.Development.json dosyasını kontrol et.");
+        _apiKey = config["GeminiApiKey"] ?? throw new Exception("Gemini API Key eksik! .env dosyasında GEMINI_API_KEY değerini kontrol et.");
     }
 
     /// <summary>
