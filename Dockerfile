@@ -1,25 +1,27 @@
-# 1. SDK Aşaması (Build için)
+# 1. SDK Aşaması
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
-WORKDIR /src
+WORKDIR /app
 
-# Proje dosyasını kopyala ve restore et
-# Eğer projen bir alt klasördeyse yolu "Ocr-Pdf/Ocr-Pdf.csproj" şeklinde düzelt
-COPY ["Ocr-Pdf.csproj", "./"]
-RUN dotnet restore "./Ocr-Pdf.csproj"
-
-# Tüm dosyaları kopyala ve yayınla
+# Önce her şeyi kopyala (Hata riskini azaltır)
 COPY . .
-RUN dotnet publish "Ocr-Pdf.csproj" -c Release -o /app/publish
 
-# 2. Runtime Aşaması (Çalıştırma için)
+# Proje dosyasını bul ve restore et
+# Eğer klasör içindeyse "dotnet restore Ocr-Pdf/Ocr-Pdf.csproj" yapman gerekebilir 
+# Ama alttaki komut klasör fark etmeksizin bulmaya çalışır:
+RUN dotnet restore
+
+# Yayınla
+RUN dotnet publish -c Release -o /app/publish
+
+# 2. Runtime Aşaması
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS final
 WORKDIR /app
 COPY --from=build /app/publish .
 
-# Render için port ve çevre değişkenleri
 ENV ASPNETCORE_URLS=http://0.0.0.0:10000
 ENV ASPNETCORE_ENVIRONMENT=Production
 
-# Uygulamayı başlat
-# Ocr-Pdf.dll kısmının proje adınla aynı olduğundan emin ol
+# BURASI ÇOK KRİTİK: .dll dosyasının adını tam doğru yazmalısın
+# Eğer proje klasör içindeyse "Ocr-Pdf.dll" yerine "bin/Release/.../Ocr-Pdf.dll" 
+# gibi bir yerde olabilir ama üstteki publish komutu /app/publish içine toplar.
 ENTRYPOINT ["dotnet", "Ocr-Pdf.dll"]
